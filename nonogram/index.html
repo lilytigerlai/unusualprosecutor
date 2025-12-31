@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>非常檢控觀 Nonogram</title>
+    <style>
+        :root {
+            --cell-size: 25px; /* 格子大小 */
+            --border-color: #333;
+            --filled-color: #2c3e50;
+            --x-color: #e74c3c;
+            --highlight-bg: #f0f0f0;
+        }
+
+        body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #fcfcfc;
+            margin: 0;
+            padding: 20px;
+        }
+
+        /* --- Logo 樣式 --- */
+        .game-logo {
+            max-width: 150px;
+            width: 100%;
+            height: auto;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+            display: block;
+            background-color: #ddd; /* 圖片載入失敗時的底色 */
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            color: #333;
+            margin-top: 0;
+            text-align: center;
+        }
+
+        .controls {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button {
+            padding: 8px 16px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #fff;
+            border: 2px solid #333;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        button:hover { background-color: #eee; }
+        button.active { background-color: #333; color: white; }
+        
+        .solve-btn {
+            border-color: #27ae60;
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .solve-btn:hover { background-color: #27ae60; color: white; }
+
+        /* --- 遊戲容器 --- */
+        #game-container {
+            display: inline-block;
+            user-select: none;
+            -webkit-user-select: none;
+            margin-top: 10px;
+            /* 預防性樣式：確保容器存在 */
+            min-height: 50px; 
+            min-width: 50px;
+        }
+
+        table {
+            border-collapse: collapse;
+            border: 3px solid #000;
+            margin: 0 auto; /* 置中 */
+        }
+
+        td {
+            padding: 0;
+            margin: 0;
+            border: 1px solid #999;
+        }
+
+        /* 提示區塊 */
+        .clue-col {
+            vertical-align: bottom;
+            text-align: center;
+            padding-bottom: 5px;
+            min-height: 100px;
+            background-color: #fff;
+            line-height: 1.2;
+            font-size: 14px;
+        }
+
+        .clue-row {
+            text-align: right;
+            padding-right: 8px;
+            white-space: nowrap;
+            min-width: 100px;
+            background-color: #fff;
+            font-size: 14px;
+        }
+
+        .clue-number { display: block; }
+        .clue-row span { display: inline-block; margin-left: 4px; }
+
+        /* 格子 */
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            background-color: #fff;
+            cursor: pointer;
+            text-align: center;
+            line-height: var(--cell-size);
+            font-size: 18px;
+        }
+
+        .cell.filled { background-color: var(--filled-color); }
+        .cell.crossed { color: var(--x-color); }
+        .cell.crossed::after { content: '×'; }
+
+        /* 粗線分隔 */
+        .thick-right { border-right: 3px solid #000 !important; }
+        .thick-bottom { border-bottom: 3px solid #000 !important; }
+        .error-clue { color: red; font-weight: bold; }
+        
+        @media (max-width: 600px) {
+            :root { --cell-size: 20px; }
+            .clue-row { font-size: 12px; min-width: 70px; }
+            .clue-col { font-size: 12px; }
+        }
+    </style>
+</head>
+<body>
+
+    <img src="logo.jpg" alt="非常檢控觀 Logo" class="game-logo" onerror="this.style.display='none';">
+
+    <h1>非常檢控觀</h1>
+    <p style="color:#666; font-size: 0.9em;">電腦：左鍵填色 / 右鍵打叉<br>手機：使用下方按鈕切換模式</p>
+
+    <div class="controls">
+        <button id="modeBtn" onclick="toggleMode()">目前模式：填色 (筆)</button>
+        <button onclick="checkGame()">檢查答案</button>
+        <button onclick="resetGame()">重置</button>
+        <button onclick="autoSolve()" class="solve-btn">一鍵顯示答案</button>
+    </div>
+
+    <div id="game-container"></div>
+
+    <script>
+        // --- 遊戲數據 ---
+        const colClues = [
+            [7,1,4,1], [1,1,1,1,1,1], [7,1,1,1,5], [3,1,1], [7,1],
+            [1,1,6], [7,1,1,1], [1,1,1], [7,6], [1,1,1],
+            [4,1,4,1,1], [1,1,1,5], [7,1,1,1,1],[1,1,3,1,1], [4], 
+            [6,3], [4,1,1,1,1,1],[4,1,1,1,1,1],[4,1,4,5], []
+        ];
+
+        const rowClues = [
+            [1,1,3,3,3,1,1], [1,1,1,1,1,1,1,1,1,1], [1,1,1,1,1,1,1,1,1,1], [3,3,3,3,3], [1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1], [1,1,1,1,1,1,1], [], [4,4,4,4], [1,1,1,1,1],
+            [4,1,1,4,4], [1,1,1,1,1,1], [1,1,1,1,1,1], [4,4,4,4], [],
+            [1,1,4], [2,2,1,1], [1,2,1,4], [1,1,1], [5,5,1]
+        ];
+
+        const gridSize = 20;
+        let gridState = Array(gridSize).fill().map(() => Array(gridSize).fill(0));
+        let isMouseDown = false;
+        let currentDrawMode = 1; 
+        let mobileMode = 1; 
+
+        // --- 初始化函數 ---
+        function initGame() {
+            const container = document.getElementById('game-container');
+            if (!container) {
+                console.error("找不到 game-container 元素！");
+                return;
+            }
+
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            headerRow.appendChild(document.createElement('td')); // 左上空白格
+
+            // 建立上方提示
+            colClues.forEach((clue, index) => {
+                const td = document.createElement('td');
+                td.className = 'clue-col';
+                if ((index + 1) % 5 === 0 && index !== gridSize - 1) td.classList.add('thick-right');
+                
+                clue.forEach(num => {
+                    const div = document.createElement('div');
+                    div.className = 'clue-number';
+                    div.textContent = num;
+                    td.appendChild(div);
+                });
+                td.id = `col-clue-${index}`;
+                headerRow.appendChild(td);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // 建立左側提示與格子
+            const tbody = document.createElement('tbody');
+            for (let r = 0; r < gridSize; r++) {
+                const tr = document.createElement('tr');
+                const clueTd = document.createElement('td');
+                clueTd.className = 'clue-row';
+                if ((r + 1) % 5 === 0 && r !== gridSize - 1) clueTd.classList.add('thick-bottom');
+                
+                rowClues[r].forEach(num => {
+                    const span = document.createElement('span');
+                    span.textContent = num;
+                    clueTd.appendChild(span);
+                });
+                clueTd.id = `row-clue-${r}`;
+                tr.appendChild(clueTd);
+
+                for (let c = 0; c < gridSize; c++) {
+                    const cell = document.createElement('td');
+                    cell.className = 'cell';
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+                    
+                    if ((c + 1) % 5 === 0 && c !== gridSize - 1) cell.classList.add('thick-right');
+                    if ((r + 1) % 5 === 0 && r !== gridSize - 1) cell.classList.add('thick-bottom');
+
+                    cell.addEventListener('mousedown', (e) => handleMouseDown(e, r, c));
+                    cell.addEventListener('mouseover', (e) => handleMouseOver(e, r, c));
+                    cell.addEventListener('contextmenu', (e) => e.preventDefault()); 
+
+                    tr.appendChild(cell);
+                }
+                tbody.appendChild(tr);
+            }
+            table.appendChild(tbody);
+            
+            container.innerHTML = '';
+            container.appendChild(table);
+
+            document.addEventListener('mouseup', () => { isMouseDown = false; });
+            refreshGridVisuals();
+        }
+
+        // --- 遊戲邏輯與操作 ---
+        function handleMouseDown(e, r, c) {
+            e.preventDefault();
+            isMouseDown = true;
+            let action = mobileMode; 
+            if (e.button === 2) action = 2; 
+
+            const currentVal = gridState[r][c];
+            currentDrawMode = (currentVal === action) ? 0 : action;
+            updateCell(r, c, currentDrawMode);
+        }
+
+        function handleMouseOver(e, r, c) {
+            if (isMouseDown) updateCell(r, c, currentDrawMode);
+        }
+
+        function updateCell(r, c, state) {
+            if (gridState[r][c] === state) return;
+            gridState[r][c] = state;
+            const cell = document.querySelector(`.cell[data-r='${r}'][data-c='${c}']`);
+            if(cell) {
+                cell.classList.remove('filled', 'crossed');
+                if (state === 1) cell.classList.add('filled');
+                if (state === 2) cell.classList.add('crossed');
+            }
+        }
+        
+        function refreshGridVisuals() {
+            for(let r=0; r<gridSize; r++) {
+                for(let c=0; c<gridSize; c++) {
+                    const cell = document.querySelector(`.cell[data-r='${r}'][data-c='${c}']`);
+                    if(!cell) continue;
+                    cell.classList.remove('filled', 'crossed');
+                    if(gridState[r][c] === 1) cell.classList.add('filled');
+                    if(gridState[r][c] === 2) cell.classList.add('crossed');
+                }
+            }
+        }
+
+        function toggleMode() {
+            const btn = document.getElementById('modeBtn');
+            if (mobileMode === 1) {
+                mobileMode = 2;
+                btn.textContent = "目前模式：打叉 (X)";
+                btn.style.backgroundColor = "#e74c3c";
+                btn.style.color = "white";
+            } else {
+                mobileMode = 1;
+                btn.textContent = "目前模式：填色 (筆)";
+                btn.style.backgroundColor = "#fff";
+                btn.style.color = "black";
+            }
+        }
+
+        function checkGame() {
+            let allCorrect = true;
+            
+            // Helper function logic
+            function getLineClues(line) {
+                const clues = [];
+                let count = 0;
+                for (let val of line) {
+                    if (val === 1) count++;
+                    else if (count > 0) { clues.push(count); count = 0; }
+                }
+                if (count > 0) clues.push(count);
+                return clues;
+            }
+            function arraysEqual(a, b) {
+                if (a.length !== b.length) return false;
+                for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+                return true;
+            }
+
+            for (let r = 0; r < gridSize; r++) {
+                const currentClues = getLineClues(gridState[r]);
+                const clueEl = document.getElementById(`row-clue-${r}`);
+                if (!arraysEqual(currentClues, rowClues[r])) {
+                    clueEl.classList.add('error-clue');
+                    allCorrect = false;
+                } else {
+                    clueEl.classList.remove('error-clue');
+                }
+            }
+            for (let c = 0; c < gridSize; c++) {
+                const col = [];
+                for (let r = 0; r < gridSize; r++) col.push(gridState[r][c]);
+                const currentClues = getLineClues(col);
+                const clueEl = document.getElementById(`col-clue-${c}`);
+                if (!arraysEqual(currentClues, colClues[c])) {
+                    clueEl.classList.add('error-clue');
+                    allCorrect = false;
+                } else {
+                    clueEl.classList.remove('error-clue');
+                }
+            }
+
+            if (allCorrect) alert("恭喜！你成功解開了謎題！(非常檢控觀)");
+            else alert("還有錯誤喔，請檢查紅色標記的提示數字。");
+        }
+
+        function resetGame() {
+            if(confirm("確定要重置遊戲嗎？")) {
+                gridState = Array(gridSize).fill().map(() => Array(gridSize).fill(0));
+                refreshGridVisuals();
+                document.querySelectorAll('.error-clue').forEach(c => c.classList.remove('error-clue'));
+            }
+        }
+
+        function autoSolve() {
+            if(!confirm("確定要顯示正確答案嗎？這將會覆蓋您目前的進度。")) return;
+            let solverGrid = Array(gridSize).fill().map(() => Array(gridSize).fill(0));
+            let changed = true, loops = 0;
+
+            // Solver Logic (Simplified)
+            while(changed && loops < 100) {
+                changed = false; loops++;
+                for(let r=0; r<gridSize; r++) {
+                    const newLine = solveLine(solverGrid[r], rowClues[r], gridSize);
+                    if(newLine) {
+                        for(let c=0; c<gridSize; c++) {
+                            if(solverGrid[r][c] === 0 && newLine[c] !== 0) {
+                                solverGrid[r][c] = newLine[c]; changed = true;
+                            }
+                        }
+                    }
+                }
+                for(let c=0; c<gridSize; c++) {
+                    const colLine = [];
+                    for(let r=0; r<gridSize; r++) colLine.push(solverGrid[r][c]);
+                    const newLine = solveLine(colLine, colClues[c], gridSize);
+                    if(newLine) {
+                        for(let r=0; r<gridSize; r++) {
+                            if(solverGrid[r][c] === 0 && newLine[r] !== 0) {
+                                solverGrid[r][c] = newLine[r]; changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            for(let r=0; r<gridSize; r++) {
+                for(let c=0; c<gridSize; c++) {
+                    if(solverGrid[r][c] === 1) gridState[r][c] = 1;
+                    if(solverGrid[r][c] === -1) gridState[r][c] = 2; 
+                }
+            }
+            refreshGridVisuals();
+            document.querySelectorAll('.error-clue').forEach(c => c.classList.remove('error-clue'));
+        }
+
+        function solveLine(currentLine, clues, length) {
+            const possibilities = [];
+            function generate(index, clueIdx, currentArr) {
+                if (clueIdx === clues.length) {
+                    possibilities.push(currentArr.concat(Array(length - index).fill(-1)));
+                    return;
+                }
+                const clue = clues[clueIdx];
+                let remainingClues = clues.slice(clueIdx + 1);
+                let spaceAfter = remainingClues.reduce((a,b)=>a+b,0) + remainingClues.length;
+                let maxPos = length - spaceAfter - clue;
+
+                for(let i = index; i <= maxPos; i++) {
+                    let prefix = []; for(let k=index; k<i; k++) prefix.push(-1);
+                    let block = []; for(let k=0; k<clue; k++) block.push(1);
+                    let suffix = []; if(clueIdx < clues.length - 1) suffix.push(-1);
+                    let nextIndex = i + clue + (clueIdx < clues.length - 1 ? 1 : 0);
+                    generate(nextIndex, clueIdx + 1, currentArr.concat(prefix, block, suffix));
+                }
+            }
+            generate(0, 0, []);
+
+            const validPossibilities = possibilities.filter(p => {
+                for(let i=0; i<length; i++) if(currentLine[i] !== 0 && currentLine[i] !== p[i]) return false;
+                return true;
+            });
+            if(validPossibilities.length === 0) return null;
+            
+            const resultLine = Array(length).fill(0);
+            for(let i=0; i<length; i++) {
+                let allOne = true, allEmpty = true;
+                for(let p of validPossibilities) {
+                    if(p[i] !== 1) allOne = false;
+                    if(p[i] !== -1) allEmpty = false;
+                }
+                if(allOne) resultLine[i] = 1;
+                else if(allEmpty) resultLine[i] = -1;
+            }
+            return resultLine;
+        }
+
+        // --- 確保 HTML 載入後才執行 (關鍵修正) ---
+        document.addEventListener('DOMContentLoaded', function() {
+            initGame();
+        });
+    </script>
+</body>
+</html>
